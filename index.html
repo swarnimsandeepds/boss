@@ -240,7 +240,8 @@ $('go').onclick = async () => {
     const out = await api('/shop', { request, rules: $('rules').value, run_id: runId });
     renderBoard(out.scoreboard); renderLessons(out.lessons);
   } catch (err) { $('error').textContent = err.message; }
-  clearInterval(poll); await refreshTrail(); await renderRuns(); await renderAnalytics().catch(() => {});
+  clearInterval(poll); await refreshTrail(); await renderRuns();
+  await api('/state').then(st => { renderBoard(st.scoreboard); renderLessons(st.lessons); }).catch(() => {}); await renderAnalytics().catch(() => {});
   $('go').disabled = false; $('status').textContent = '';
 };
 

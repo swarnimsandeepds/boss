@@ -49,6 +49,11 @@ WEB_FETCH_TOOL = {"type": os.getenv("BOSS_WEB_FETCH_TYPE", "web_fetch_20260209")
 VERIFY_CHECKOUT = os.getenv("BOSS_VERIFY_CHECKOUT", "1") != "0"   # re-check price and stock before approval
 ASK_WHEN_VAGUE = os.getenv("BOSS_ASK_WHEN_VAGUE", "1") != "0"     # ask instead of guessing on vague requests
 PRICE_JUMP_USD = float(os.getenv("BOSS_PRICE_JUMP_USD", "5"))     # a rise this large needs the shopper's yes
+COGNEE_ON = os.getenv("COGNEE_ENABLED", "0") == "1"                # long-term memory, optional
+COGNEE_URL, COGNEE_KEY = os.getenv("COGNEE_SERVICE_URL"), os.getenv("COGNEE_API_KEY")
+SIE_KEY = os.getenv("SIE_API_KEY")                                 # Superlinked SIE reranker, optional
+SIE_URL = os.getenv("SIE_BASE_URL")
+SIE_MODEL = os.getenv("SIE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 AGENT_EFFORT = os.getenv("BOSS_AGENT_EFFORT", "low")    # buying agents: speed matters
 JUDGE_EFFORT = os.getenv("BOSS_JUDGE_EFFORT", "medium")
 AMPLITUDE_KEY = os.getenv("AMPLITUDE_API_KEY")
@@ -71,6 +76,7 @@ def llm() -> AsyncAnthropic:
     if _llm_client is None:
         _llm_client = AsyncAnthropic()
     return _llm_client
+_background: set[asyncio.Task] = set()  # keeps background tasks alive until they finish
 _memory_events: list[dict] = []  # only used if SINGLESTORE_URL is not set
 
 
@@ -243,6 +249,74 @@ def analytics() -> dict:
         return {**_analytics_python(), "source": "fallback", "sql_error": str(exc)}
 
 
+# ---------- long-term memory (Cognee, optional) ----------
+
+_cognee_connected = False
+
+
+async def _cognee():
+    """Import Cognee only when it is switched on. Connects to Cognee Cloud when a URL and key are set."""
+    global _cognee_connected
+    import cognee
+    if COGNEE_URL and COGNEE_KEY and not _cognee_connected:
+        await cognee.serve(url=COGNEE_URL, api_key=COGNEE_KEY)
+        _cognee_connected = True
+    return cognee
+
+
+async def memory_recall(run_id: str, query: str) -> list[str]:
+    """Memories relevant to this request. Logged so the trace shows what Boss remembered."""
+    if not COGNEE_ON:
+        return []
+    try:
+        cognee = await _cognee()
+        results = await asyncio.wait_for(cognee.recall(query_text=query), timeout=20)
+        memories = [str(getattr(r, "text", None) or r) for r in (results or [])][:5]
+    except Exception as exc:
+        log(run_id, "memory_failed", "boss", {"during": "recall", "error": str(exc) or type(exc).__name__})
+        return []
+    log(run_id, "memory_recalled", "boss", {"query": query, "memories": memories})
+    return memories
+
+
+async def memory_remember(run_id: str, text: str) -> None:
+    """Store a lesson in long-term memory. Runs in the background because graph building is slow."""
+    try:
+        cognee = await _cognee()
+        await cognee.remember(text)
+        log(run_id, "memory_saved", "boss", {"text": text})
+    except Exception as exc:
+        log(run_id, "memory_failed", "boss", {"during": "remember", "error": str(exc) or type(exc).__name__})
+
+
+# ---------- rerank (Superlinked SIE, optional) ----------
+
+def _sie_scores(query: str, docs: list[str]) -> dict[int, float]:
+    from sie_sdk import SIEClient
+    from sie_sdk.types import Item
+    client = SIEClient(SIE_URL, api_key=SIE_KEY) if SIE_URL else SIEClient(api_key=SIE_KEY)
+    result = client.score(SIE_MODEL, Item(text=query), [Item(id=str(i), text=d) for i, d in enumerate(docs)])
+    return {int(entry["item_id"]): float(entry["score"]) for entry in result["scores"]}
+
+
+async def rerank_bids(run_id: str, request: str, rules: str, bids: list[dict]) -> None:
+    """Score each real bid against the request before the judge sees it. Adds rerank_score in place."""
+    valid = [b for b in bids if not b.get("error")]
+    if not SIE_KEY or len(valid) < 2:
+        return
+    docs = [f"{b.get('title')} ({b.get('variant')}) from {b.get('seller')}, ${b.get('price_usd')}, delivery {b.get('delivery')}"
+            for b in valid]
+    try:
+        scores = await asyncio.wait_for(asyncio.to_thread(_sie_scores, f"{request}. {rules}".strip(), docs), timeout=20)
+    except Exception as exc:
+        log(run_id, "rerank_failed", "boss", {"error": str(exc) or type(exc).__name__})
+        return
+    for i, bid in enumerate(valid):
+        if i in scores:
+            bid["rerank_score"] = round(scores[i], 4)
+    log(run_id, "bids_reranked", "boss", {"model": SIE_MODEL, "scores": {b["agent"]: b.get("rerank_score") for b in valid}})
+
+
 # ---------- analytics (Amplitude) ----------
 
 async def track(event_type: str, props: dict) -> None:
@@ -357,6 +431,7 @@ Reply with only a JSON object:
                 "score": 0-100, "reason": str}}],
   "summary": str}}
 Each reason is one plain sentence citing the specific price, date, rule, lesson, or mismatch.
+A bid may carry "rerank_score", a relevance score from a reranker; higher means closer to the request.
 When two bids are close, prefer the agent with the better track record and say so.
 If no bid is acceptable, set winner to null and say what to ask the shopper."""
     resp = await llm().messages.create(
@@ -476,7 +551,11 @@ async def shop(body: ShopRequest):
             return {"run_id": run_id, "needs_clarification": check["question"], "bids": [], "decision": None,
                     "scoreboard": board, "lessons": learned}
 
+    memories = await memory_recall(run_id, body.request)
+    learned = learned + [m for m in memories if m not in learned]
+
     bids = await asyncio.gather(*(buying_agent(run_id, n, s, body.request, learned) for n, s in AGENTS.items()))
+    await rerank_bids(run_id, body.request, body.rules, list(bids))
 
     log(run_id, "judging_started", "boss", {"bids": len(bids)})
     try:
@@ -553,6 +632,9 @@ async def feedback(run_id: str, body: Feedback):
               f"from {bid.get('seller', 'a seller')}: {body.reason.strip()}")
     log(run_id, "user_rejected", body.agent, {"reason": body.reason.strip()})
     log(run_id, "lesson_learned", "boss", {"lesson": lesson})
+    if COGNEE_ON:
+        _background.add(task := asyncio.create_task(memory_remember(run_id, lesson)))
+        task.add_done_callback(_background.discard)
     await track("user_rejected", {"run_id": run_id, "agent": body.agent})
     return {"lesson": lesson, "lessons": lessons(), "scoreboard": scoreboard()}
 

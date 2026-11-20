@@ -50,5 +50,16 @@ The wrong-size and vague-request drills call the real judge and pre-check, so th
 
 ## Sponsor tools
 
-- SingleStore: audit trail, live agent scoreboard, lesson store
-- Amplitude: decision events (`bid_won`, `bid_rejected`, `user_rejected`, `order_approved`)
+Each one is optional, switched on by its setting in `.env`, and fails soft: if it is off or
+errors, the run continues and the failure is written to the trail.
+
+- **SingleStore** (`SINGLESTORE_URL`): audit trail, live agent scoreboard, lesson store, and the
+  SQL behind `/analytics`.
+- **Amplitude** (`AMPLITUDE_API_KEY`): decision events (`bid_won`, `bid_rejected`, `user_rejected`,
+  `order_approved`, `price_changed`, `out_of_stock`, `clarification_needed`).
+- **Cognee** (`COGNEE_ENABLED=1`, after `pip install "cognee[anthropic]"`): long-term memory.
+  Each overrule lesson is stored with `cognee.remember`, and each new request recalls relevant
+  memories with `cognee.recall` and logs `memory_recalled`. Set `COGNEE_SERVICE_URL` and
+  `COGNEE_API_KEY` to use Cognee Cloud; otherwise Cognee reads its own `LLM_*` settings from `.env`.
+- **Superlinked SIE** (`SIE_API_KEY`, after `pip install sie-sdk`, Python 3.12+): reranks the bids
+  against the request before the judge sees them and logs `bids_reranked`.
