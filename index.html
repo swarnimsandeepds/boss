@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boss</title>
+<style>
+  :root { --bg:#f6f5f1; --card:#fff; --ink:#1c1b19; --mute:#6b6a65; --line:#dedcd3; --accent:#4b3fb5;
+          --win:#1d7a55; --winbg:#e3f4ec; --rej:#a33030; --rejbg:#fbeaea; --run:#8a5a0b; --runbg:#faeeda; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161614; --card:#21211e; --ink:#eeece4; --mute:#a3a199; --line:#3a3935; --accent:#a9a2f0;
+            --win:#6fd3a8; --winbg:#12352a; --rej:#f09595; --rejbg:#451a1a; --run:#f0b45a; --runbg:#3d2a08; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0; font-size:22px; } h2 { margin:0 0 10px; font-size:14px; color:var(--mute); font-weight:600; }
+  header p { margin:2px 0 0; color:var(--mute); }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:16px; padding:12px 24px 40px; }
+  @media (max-width: 980px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  textarea, input[type=text] { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px;
+    background:var(--bg); color:var(--ink); font:inherit; }
+  textarea { resize:vertical; min-height:48px; }
+  label { display:block; font-size:13px; color:var(--mute); margin:8px 0 4px; }
+  button { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent);
+    color:#fff; cursor:pointer; } button.ghost { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .lanes { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px; }
+  @media (max-width: 760px) { .lanes { grid-template-columns:1fr; } }
+  .lane { border:1px solid var(--line); border-radius:10px; padding:12px; min-height:200px; }
+  .lane.win { border-color:var(--win); background:var(--winbg); } .lane.reject { background:var(--rejbg); border-color:var(--rej); }
+  .lane h3 { margin:0; font-size:15px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
+  .pill.win { color:var(--win); border-color:var(--win); } .pill.reject { color:var(--rej); border-color:var(--rej); }
+  .pill.running { color:var(--run); border-color:var(--run); background:var(--runbg); }
+  .small { font-size:13px; color:var(--mute); } .price { font-size:20px; font-weight:600; margin:6px 0 0; }
+  .lane a { color:var(--accent); word-break:break-word; }
+  .reason { margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--mute); font-weight:600; }
+  .trace { max-height:420px; overflow:auto; font-size:13px; }
+  .ev { display:grid; grid-template-columns:70px 54px 1fr; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); }
+  .ev .who { font-weight:600; } .ev details { grid-column:1 / -1; } .ev pre { margin:6px 0 0; white-space:pre-wrap; word-break:break-word;
+    background:var(--bg); padding:8px; border-radius:6px; font-size:12px; }
+  .filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .filters button { padding:3px 10px; font-size:12px; background:transparent; color:var(--mute); border-color:var(--line); }
+  .filters button.on { color:var(--accent); border-color:var(--accent); }
+  ul.plain { list-style:none; margin:0; padding:0; } ul.plain li { padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  ul.plain li.link { cursor:pointer; } ul.plain li.link:hover { color:var(--accent); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  #summary { font-size:15px; margin:0 0 4px; } #error { color:var(--rej); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Boss</h1>
+  <p>Your buying agents compete. Boss picks, shows why, and learns when you overrule it.</p>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <label for="request">What do you need?</label>
+      <textarea id="request">Men's running shoes, size 10, under $120, delivered by Thursday</textarea>
+      <label for="rules">Your rules</label>
+      <textarea id="rules">Never buy from sellers with poor reviews. Ask me before anything over $150. New items preferred over used.</textarea>
+      <div class="row"><button id="go">Send the agents</button><span id="status" class="small"></span><span id="error"></span></div>
+    </div>
+
+    <div class="card">
+      <h2>Agents</h2>
+      <div class="lanes" id="lanes"></div>
+    </div>
+
+    <div class="card" id="decisionCard" hidden>
+      <h2>Boss decision</h2>
+      <p id="summary"></p>
+      <div class="row">
+        <button id="approve">Approve and open product page</button>
+        <input type="text" id="reason" placeholder="Wrong pick? Tell Boss why, and it will remember" style="flex:1; min-width:220px">
+        <button class="ghost" id="overrule">Overrule and teach</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Trace <span id="traceRun" class="small"></span></h2>
+      <div class="filters" id="filters"></div>
+      <div class="trace" id="trace"><span class="small">Every agent step will appear here as it happens.</span></div>
+    </div>
+  </section>
+
+  <aside>
+    <div class="card"><h2>Agent track record</h2>
+      <table><thead><tr><th>Agent</th><th>Bids</th><th>Wins</th><th>Rejected</th><th>Overruled</th><th>Trust</th></tr></thead>
+      <tbody id="board"></tbody></table></div>
+    <div class="card"><h2>What Boss has learned</h2><ul class="plain" id="lessons"></ul></div>
+    <div class="card"><h2>Trail analytics <span id="anSource" class="small"></span></h2>
+      <table><thead><tr><th>Agent</th><th>Bids</th><th>Avg time</th><th>Avg price</th></tr></thead>
+      <tbody id="anAgents"></tbody></table>
+      <ul class="plain" id="anFacts"></ul></div>
+    <div class="card"><h2>Past runs</h2><ul class="plain" id="runs"></ul></div>
+  </aside>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+let agents = {}, runId = null, trail = [], filter = 'all', poll = null, winner = null;
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : undefined);
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+
+function renderBoard(rows) {
+  $('board').replaceChildren(...rows.map(r => {
+    const tr = el('tr');
+    [r.agent, r.bids, r.wins, r.rejected, r.overruled, r.trust == null ? 'n/a' : r.trust + '%'].forEach(v => tr.append(el('td', null, v)));
+    return tr;
+  }));
+}
+function renderLessons(list) {
+  $('lessons').replaceChildren(...(list.length ? list.map(l => el('li', null, l)) : [el('li', 'small', 'Nothing yet. Overrule a pick to teach it.')]));
+}
+async function renderAnalytics() {
+  const a = await api('/analytics');
+  $('anSource').textContent = '· ' + (a.source === 'singlestore' ? 'SQL on SingleStore' : a.source === 'fallback' ? 'SQL failed, computed in app' : 'in memory, no database set');
+  $('anAgents').replaceChildren(...a.per_agent.map(r => {
+    const tr = el('tr');
+    [r.agent, r.bids, r.avg_seconds == null ? 'n/a' : r.avg_seconds.toFixed(1) + 's', r.avg_price_usd == null ? 'n/a' : '$' + r.avg_price_usd.toFixed(2)]
+      .forEach(v => tr.append(el('td', null, v)));
+    return tr;
+  }));
+  const facts = [
+    'Losing bids cost ' + (a.avg_price_gap_usd == null ? 'n/a' : (a.avg_price_gap_usd >= 0 ? '$' + a.avg_price_gap_usd.toFixed(2) + ' more' : '$' + (-a.avg_price_gap_usd).toFixed(2) + ' less')) + ' than winners on average',
+    'You approved ' + a.approved + ' and overruled ' + a.overruled,
+    ...a.rejections.map(r => 'Rejected ' + r.agent + ': ' + (r.reason || 'no reason recorded')),
+  ];
+  if (a.sql_error) facts.push('SQL error: ' + a.sql_error);
+  $('anFacts').replaceChildren(...facts.map(f => el('li', null, f)));
+}
+async function renderRuns() {
+  const runs = await api('/runs');
+  $('runs').replaceChildren(...(runs.length ? runs.map(r => {
+    const li = el('li', 'link', r.request || r.run_id);
+    li.onclick = () => loadRun(r.run_id);
+    return li;
+  }) : [el('li', 'small', 'No runs yet.')]));
+}
+
+function renderLanes() {
+  const byAgent = {};
+  for (const e of trail) (byAgent[e.actor] ||= []).push(e);
+  $('lanes').replaceChildren(...Object.entries(agents).map(([name, strategy]) => {
+    const evs = byAgent[name] || [];
+    const bid = evs.find(e => e.step === 'bid_submitted')?.payload;
+    const verdictEv = evs.find(e => ['bid_won', 'bid_rejected', 'bid_runner_up'].includes(e.step));
+    const state = verdictEv ? { bid_won:'win', bid_rejected:'reject', bid_runner_up:'runner up' }[verdictEv.step]
+                : bid ? 'bid in' : evs.length ? 'running' : 'idle';
+    const lane = el('div', 'lane' + (state === 'win' ? ' win' : state === 'reject' ? ' reject' : ''));
+    const h = el('h3', null, 'Agent ' + name);
+    h.append(el('span', 'pill ' + (state === 'win' ? 'win' : state === 'reject' ? 'reject' : state === 'running' ? 'running' : ''), state));
+    lane.append(h, el('div', 'small', strategy));
+    const searches = evs.filter(e => e.step === 'web_search');
+    if (searches.length) lane.append(el('div', 'small', 'Searched: ' + searches.map(s => s.payload.query).join(' | ')));
+    if (bid) {
+      if (bid.error) lane.append(el('div', 'reason', 'Failed: ' + bid.error));
+      else {
+        lane.append(el('div', 'price', '$' + bid.price_usd), el('div', null, bid.title),
+          el('div', 'small', [bid.seller, bid.variant, bid.delivery].filter(Boolean).join(' · ')));
+        if (/^https?:\/\//.test(bid.url || '')) { const a = el('a', null, 'View product'); a.href = bid.url; a.target = '_blank'; a.rel = 'noopener'; lane.append(a); }
+        lane.append(el('div', 'small', 'Took ' + (bid.duration_ms / 1000).toFixed(1) + 's'));
+      }
+    }
+    if (verdictEv) lane.append(el('div', 'reason', 'Boss (' + verdictEv.payload.score + '/100): ' + verdictEv.payload.reason));
+    return lane;
+  }));
+}
+
+function renderTrace() {
+  const actors = ['all', 'user', 'boss', ...Object.keys(agents)];
+  $('filters').replaceChildren(...actors.map(a => {
+    const b = el('button', filter === a ? 'on' : '', a === 'all' ? 'All' : a.length === 1 ? 'Agent ' + a : a);
+    b.onclick = () => { filter = a; renderTrace(); };
+    return b;
+  }));
+  const rows = trail.filter(e => filter === 'all' || e.actor === filter);
+  $('traceRun').textContent = runId ? '· run ' + runId + ' · ' + trail.length + ' events' : '';
+  if (!rows.length) { $('trace').replaceChildren(el('span', 'small', 'No events yet.')); return; }
+  $('trace').replaceChildren(...rows.map(e => {
+    const row = el('div', 'ev');
+    row.append(el('span', 'small', (e.created_at || '').replace('T', ' ').slice(11, 19)),
+               el('span', 'who', e.actor.length === 1 ? 'Agent ' + e.actor : e.actor),
+               el('span', null, e.step.replaceAll('_', ' ')));
+    const d = el('details'); d.append(el('summary', 'small', 'details'), el('pre', null, JSON.stringify(e.payload, null, 2)));
+    row.append(d);
+    return row;
+  }));
+}
+
+function renderDecision() {
+  const d = trail.find(e => e.step === 'decision_made');
+  $('decisionCard').hidden = !d;
+  if (!d) return;
+  winner = d.payload.winner;
+  $('summary').textContent = (winner ? 'Agent ' + winner + ' wins. ' : 'No acceptable bid. ') + (d.payload.summary || '');
+  $('approve').disabled = !winner || trail.some(e => e.step === 'order_approved');
+  $('overrule').disabled = !winner;
+}
+
+async function refreshTrail() {
+  if (!runId) return;
+  trail = await api('/trail/' + runId);
+  renderLanes(); renderTrace(); renderDecision();
+}
+async function loadRun(id) { runId = id; await refreshTrail(); }
+
+$('go').onclick = async () => {
+  const request = $('request').value.trim();
+  if (!request) { $('error').textContent = 'Type what you need first.'; return; }
+  $('error').textContent = ''; $('go').disabled = true; $('status').textContent = 'Agents are searching the live web…';
+  runId = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+  trail = []; winner = null; renderLanes(); renderTrace(); renderDecision();
+  poll = setInterval(() => refreshTrail().catch(() => {}), 1000);
+  try {
+    const out = await api('/shop', { request, rules: $('rules').value, run_id: runId });
+    renderBoard(out.scoreboard); renderLessons(out.lessons);
+  } catch (err) { $('error').textContent = err.message; }
+  clearInterval(poll); await refreshTrail(); await renderRuns(); await renderAnalytics().catch(() => {});
+  $('go').disabled = false; $('status').textContent = '';
+};
+
+$('approve').onclick = async () => {
+  try { const out = await api('/approve/' + runId, {}); window.open(out.url, '_blank', 'noopener'); await refreshTrail(); await renderAnalytics().catch(() => {}); }
+  catch (err) { $('error').textContent = err.message; }
+};
+
+$('overrule').onclick = async () => {
+  const reason = $('reason').value.trim();
+  if (!reason) { $('error').textContent = 'Give a reason so Boss can learn from it.'; return; }
+  $('error').textContent = '';
+  try {
+    const out = await api('/feedback/' + runId, { agent: winner, reason });
+    $('reason').value = ''; renderBoard(out.scoreboard); renderLessons(out.lessons); await refreshTrail(); await renderAnalytics().catch(() => {});
+  } catch (err) { $('error').textContent = err.message; }
+};
+$('reason').oninput = () => { $('error').textContent = ''; };
+
+(async () => {
+  const state = await api('/state');
+  agents = state.agents; renderBoard(state.scoreboard); renderLessons(state.lessons); renderLanes(); renderTrace(); await renderRuns(); await renderAnalytics();
+})().catch(err => { $('error').textContent = err.message; });
+</script>
+</body>
+</html>
