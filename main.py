@@ -45,6 +45,10 @@ WEB_SEARCH_TOOL = {
     "name": "web_search",
     "max_uses": int(os.getenv("BOSS_MAX_SEARCHES", "3")),
 }
+WEB_FETCH_TOOL = {"type": os.getenv("BOSS_WEB_FETCH_TYPE", "web_fetch_20260209"), "name": "web_fetch", "max_uses": 2}
+VERIFY_CHECKOUT = os.getenv("BOSS_VERIFY_CHECKOUT", "1") != "0"   # re-check price and stock before approval
+ASK_WHEN_VAGUE = os.getenv("BOSS_ASK_WHEN_VAGUE", "1") != "0"     # ask instead of guessing on vague requests
+PRICE_JUMP_USD = float(os.getenv("BOSS_PRICE_JUMP_USD", "5"))     # a rise this large needs the shopper's yes
 AGENT_EFFORT = os.getenv("BOSS_AGENT_EFFORT", "low")    # buying agents: speed matters
 JUDGE_EFFORT = os.getenv("BOSS_JUDGE_EFFORT", "medium")
 AMPLITUDE_KEY = os.getenv("AMPLITUDE_API_KEY")
@@ -173,6 +177,8 @@ def _analytics_python() -> dict:
     price = {(b["run_id"], b["actor"]): _num(b["payload"].get("price_usd")) for b in bids}
     gaps = []
     for d in events(step="decision_made", limit=5000):
+        if d["payload"].get("fallback"):
+            continue  # compare against the judge's own pick, not a later stock fallback
         won = price.get((d["run_id"], d["payload"].get("winner")))
         if not won:
             continue
@@ -209,7 +215,8 @@ def _analytics_sql() -> dict:
             "JOIN events w ON w.run_id = d.run_id AND w.step = 'bid_submitted' "
             "  AND w.actor = JSON_EXTRACT_STRING(d.payload, 'winner') "
             "JOIN events l ON l.run_id = d.run_id AND l.step = 'bid_submitted' AND l.actor <> w.actor "
-            f"WHERE d.step = 'decision_made' AND {price.format('w')} > 0 AND {price.format('l')} > 0"
+            "WHERE d.step = 'decision_made' AND JSON_EXTRACT_JSON(d.payload, 'fallback') IS NULL "
+            f"AND {price.format('w')} > 0 AND {price.format('l')} > 0"
         )
         gap = cur.fetchone()[0]
         cur.execute(
@@ -275,13 +282,13 @@ def text_of(response) -> str:
     return "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
 
 
-async def search_and_answer(run_id: str, name: str, prompt: str) -> tuple[str, list[str]]:
+async def search_and_answer(run_id: str, name: str, prompt: str, tools: list[dict] | None = None) -> tuple[str, list[str]]:
     """One agent turn with live web search. Each search is logged the moment it runs."""
     messages: list[dict] = [{"role": "user", "content": prompt}]
     searches: list[str] = []
     for _ in range(4):  # the server may pause a long search turn; resume it
         async with llm().messages.stream(
-            model=MODEL, max_tokens=8000, tools=[WEB_SEARCH_TOOL],
+            model=MODEL, max_tokens=8000, tools=tools or [WEB_SEARCH_TOOL],
             output_config={"effort": AGENT_EFFORT}, messages=messages,
         ) as stream:
             async for event in stream:
@@ -361,12 +368,81 @@ If no bid is acceptable, set winner to null and say what to ask the shopper."""
     return extract_json(text_of(resp))
 
 
+async def clarify(request: str, rules: str) -> dict:
+    """Before any agent runs: is the request specific enough to buy the right thing without guessing?"""
+    prompt = f"""You are Boss. You manage buying agents for one shopper. Before sending the agents out,
+decide whether this request is specific enough to buy the right thing without guessing.
+
+Request: {request}
+Shopper rules: {rules or "none given"}
+
+Ask only when a missing detail would change what gets bought, such as quantity, size, or which kind
+of item is meant. Do not ask about things the agents can reasonably choose, such as brand or color.
+Reply with only a JSON object: {{"clear": true | false, "question": str}}
+"question" is one short question for the shopper, and an empty string when the request is clear."""
+    resp = await llm().messages.create(
+        model=MODEL, max_tokens=2000, output_config={"effort": "low"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if resp.stop_reason == "refusal":
+        raise RuntimeError("the model declined this request")
+    return extract_json(text_of(resp))
+
+
+async def verify_bid(run_id: str, bid: dict) -> dict:
+    """Right before the shopper pays: read the live product page again for price and stock."""
+    prompt = f"""You are Boss, re-checking a product right before the shopper pays.
+
+Product page: {bid.get("url")}
+Expected: {bid.get("title")} ({bid.get("variant") or "no variant given"}) from {bid.get("seller")} at ${bid.get("price_usd")}.
+
+Fetch the page and report what it says right now for that exact variant. Search the web only if the
+page cannot be read. Reply with only a JSON object:
+{{"available": true | false | null, "current_price_usd": number | null, "evidence": str}}
+Use null when you cannot tell. Never guess. "evidence" is one sentence on what you saw."""
+    text, _ = await search_and_answer(run_id, "boss", prompt, tools=[WEB_FETCH_TOOL, WEB_SEARCH_TOOL])
+    return extract_json(text)
+
+
+def checkout_decision(bid: dict, check: dict) -> dict:
+    """The rule Boss applies to a fresh price and stock check. No model call, so it can be drilled."""
+    if check.get("available") is False:
+        return {"action": "out_of_stock"}
+    was, now = _num(bid.get("price_usd")), _num(check.get("current_price_usd"))
+    if was is None or now is None:
+        return {"action": "unverified"}
+    if now - was >= PRICE_JUMP_USD:
+        return {"action": "price_changed", "was": was, "now": now}
+    return {"action": "ok", "now": now}
+
+
+def current_pick(trail: list[dict]) -> tuple[str | None, dict | None]:
+    """The agent Boss currently backs for this run (the latest decision) and that agent's bid."""
+    winner = next((e["payload"].get("winner") for e in reversed(trail) if e["step"] == "decision_made"), None)
+    bid = next((e["payload"] for e in trail if e["step"] == "bid_submitted" and e["actor"] == winner), None)
+    return winner, bid
+
+
+def runner_up(trail: list[dict]) -> str | None:
+    """Best runner-up that is still in stock and has a real link."""
+    gone = {e["actor"] for e in trail if e["step"] == "out_of_stock"}
+    bids = {e["actor"]: e["payload"] for e in trail if e["step"] == "bid_submitted"}
+    options = [e for e in trail if e["step"] == "bid_runner_up" and e["actor"] not in gone
+               and bids.get(e["actor"], {}).get("url") and not bids[e["actor"]].get("error")]
+    options.sort(key=lambda e: _num(e["payload"].get("score")) or 0, reverse=True)
+    return options[0]["actor"] if options else None
+
+
 # ---------- API ----------
 
 class ShopRequest(BaseModel):
     request: str
     rules: str = ""
     run_id: str | None = None  # the page sends one so it can poll the trace while agents work
+
+
+class Approval(BaseModel):
+    confirm: bool = False  # the shopper has seen Boss's warning and still wants this pick
 
 
 class Feedback(BaseModel):
@@ -388,6 +464,18 @@ async def shop(body: ShopRequest):
     board, learned = scoreboard(), lessons()
     log(run_id, "context_loaded", "boss", {"scoreboard": board, "lessons": learned})
 
+    if ASK_WHEN_VAGUE:
+        try:
+            check = await clarify(body.request, body.rules)
+        except Exception as exc:  # a failed pre-check must not block the run; record it and carry on
+            check = {"clear": True}
+            log(run_id, "clarify_failed", "boss", {"error": str(exc)})
+        if check.get("clear") is False and check.get("question"):
+            log(run_id, "clarification_needed", "boss", {"question": check["question"]})
+            await track("clarification_needed", {"run_id": run_id})
+            return {"run_id": run_id, "needs_clarification": check["question"], "bids": [], "decision": None,
+                    "scoreboard": board, "lessons": learned}
+
     bids = await asyncio.gather(*(buying_agent(run_id, n, s, body.request, learned) for n, s in AGENTS.items()))
 
     log(run_id, "judging_started", "boss", {"bids": len(bids)})
@@ -407,13 +495,48 @@ async def shop(body: ShopRequest):
 
 
 @app.post("/approve/{run_id}")
-async def approve(run_id: str):
+async def approve(run_id: str, body: Approval | None = None):
+    """Approve the current pick. Boss re-checks the live page first and stops if anything changed."""
+    confirm = bool(body and body.confirm)
     trail = events(run_id=run_id)
-    winner = next((e["payload"].get("winner") for e in trail if e["step"] == "decision_made"), None)
-    bid = next((e["payload"] for e in trail if e["step"] == "bid_submitted" and e["actor"] == winner), None)
+    winner, bid = current_pick(trail)
     if not bid or not bid.get("url"):
         raise HTTPException(404, "No winning bid to approve for this run")
-    log(run_id, "order_approved", "user", {"agent": winner, "url": bid["url"], "price_usd": bid.get("price_usd")})
+
+    if VERIFY_CHECKOUT and not confirm:
+        try:
+            check = await verify_bid(run_id, bid)
+        except Exception as exc:
+            check = {"available": None, "current_price_usd": None, "error": str(exc)}
+        log(run_id, "checkout_check", "boss", {"agent": winner, "bid_price_usd": bid.get("price_usd"), **check})
+        verdict = checkout_decision(bid, check)
+
+        if verdict["action"] == "out_of_stock":
+            log(run_id, "out_of_stock", winner, {"evidence": check.get("evidence")})
+            backup = runner_up(events(run_id=run_id))
+            if backup:
+                message = f"Agent {winner}'s pick is out of stock. Boss fell back to runner-up Agent {backup}. Review it and approve again."
+                log(run_id, "fallback_to_runner_up", "boss", {"from": winner, "to": backup})
+            else:
+                message = f"Agent {winner}'s pick is out of stock and there is no acceptable runner-up. Send the agents again."
+            log(run_id, "decision_made", "boss", {"winner": backup, "summary": message, "fallback": True})
+            await track("out_of_stock", {"run_id": run_id, "agent": winner, "fallback": backup})
+            return {"needs_confirmation": True, "can_confirm": False, "message": message}
+
+        if verdict["action"] == "price_changed":
+            message = (f"The price rose from ${verdict['was']:.2f} to ${verdict['now']:.2f} since Agent {winner} bid. "
+                       "Boss stopped. Approve at the new price?")
+            log(run_id, "price_changed", "boss", {"agent": winner, "was": verdict["was"], "now": verdict["now"]})
+            await track("price_changed", {"run_id": run_id, "agent": winner})
+            return {"needs_confirmation": True, "can_confirm": True, "message": message}
+
+        if verdict["action"] == "unverified":
+            message = "Boss could not confirm the current price and stock on the product page. Open it anyway?"
+            log(run_id, "checkout_unverified", "boss", {"agent": winner, "reason": check.get("error") or check.get("evidence")})
+            return {"needs_confirmation": True, "can_confirm": True, "message": message}
+
+    log(run_id, "order_approved", "user", {"agent": winner, "url": bid["url"], "price_usd": bid.get("price_usd"),
+                                           "confirmed_after_warning": confirm})
     await track("order_approved", {"run_id": run_id, "agent": winner, "price_usd": bid.get("price_usd")})
     return {"url": bid["url"]}
 

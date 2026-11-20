@@ -49,7 +49,8 @@
   ul.plain { list-style:none; margin:0; padding:0; } ul.plain li { padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
   ul.plain li.link { cursor:pointer; } ul.plain li.link:hover { color:var(--accent); }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
-  #summary { font-size:15px; margin:0 0 4px; } #error { color:var(--rej); }
+  #summary { font-size:15px; margin:0 0 4px; }
+  #notice { margin:6px 0 0; padding:8px 10px; border-radius:8px; background:var(--runbg); color:var(--run); font-size:14px; } #error { color:var(--rej); }
 </style>
 </head>
 <body>
@@ -75,6 +76,7 @@
     <div class="card" id="decisionCard" hidden>
       <h2>Boss decision</h2>
       <p id="summary"></p>
+      <p id="notice" class="small" hidden></p>
       <div class="row">
         <button id="approve">Approve and open product page</button>
         <input type="text" id="reason" placeholder="Wrong pick? Tell Boss why, and it will remember" style="flex:1; min-width:220px">
@@ -105,7 +107,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
-let agents = {}, runId = null, trail = [], filter = 'all', poll = null, winner = null;
+let agents = {}, runId = null, trail = [], filter = 'all', poll = null, winner = null, pendingConfirm = false;
 
 async function api(path, body) {
   const res = await fetch(path, body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : undefined);
@@ -199,13 +201,24 @@ function renderTrace() {
   }));
 }
 
+function setNotice(text) { $('notice').hidden = !text; $('notice').textContent = text || ''; }
+
 function renderDecision() {
-  const d = trail.find(e => e.step === 'decision_made');
-  $('decisionCard').hidden = !d;
-  if (!d) return;
-  winner = d.payload.winner;
-  $('summary').textContent = (winner ? 'Agent ' + winner + ' wins. ' : 'No acceptable bid. ') + (d.payload.summary || '');
-  $('approve').disabled = !winner || trail.some(e => e.step === 'order_approved');
+  const d = trail.findLast(e => e.step === 'decision_made');
+  const ask = trail.findLast(e => e.step === 'clarification_needed');
+  $('decisionCard').hidden = !d && !ask;
+  if (!d && !ask) return;
+  if (!d) {
+    winner = null;
+    $('summary').textContent = 'Boss needs one detail before sending the agents: ' + ask.payload.question;
+    setNotice('Add the answer to your request above and send the agents again.');
+  } else {
+    winner = d.payload.winner;
+    $('summary').textContent = (winner ? 'Agent ' + winner + ' wins. ' : 'No acceptable bid. ') + (d.payload.summary || '');
+  }
+  const approved = trail.some(e => e.step === 'order_approved');
+  $('approve').disabled = !winner || approved;
+  $('approve').textContent = approved ? 'Approved' : pendingConfirm ? 'Yes, approve anyway' : 'Approve and open product page';
   $('overrule').disabled = !winner;
 }
 
@@ -214,14 +227,14 @@ async function refreshTrail() {
   trail = await api('/trail/' + runId);
   renderLanes(); renderTrace(); renderDecision();
 }
-async function loadRun(id) { runId = id; await refreshTrail(); }
+async function loadRun(id) { runId = id; pendingConfirm = false; setNotice(''); await refreshTrail(); }
 
 $('go').onclick = async () => {
   const request = $('request').value.trim();
   if (!request) { $('error').textContent = 'Type what you need first.'; return; }
   $('error').textContent = ''; $('go').disabled = true; $('status').textContent = 'Agents are searching the live web…';
   runId = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
-  trail = []; winner = null; renderLanes(); renderTrace(); renderDecision();
+  trail = []; winner = null; pendingConfirm = false; setNotice(''); renderLanes(); renderTrace(); renderDecision();
   poll = setInterval(() => refreshTrail().catch(() => {}), 1000);
   try {
     const out = await api('/shop', { request, rules: $('rules').value, run_id: runId });
@@ -232,8 +245,20 @@ $('go').onclick = async () => {
 };
 
 $('approve').onclick = async () => {
-  try { const out = await api('/approve/' + runId, {}); window.open(out.url, '_blank', 'noopener'); await refreshTrail(); await renderAnalytics().catch(() => {}); }
-  catch (err) { $('error').textContent = err.message; }
+  // Open the tab during the click so the browser allows it, then point it at the product once Boss has re-checked.
+  const tab = window.open('', '_blank');
+  $('approve').disabled = true; $('status').textContent = pendingConfirm ? '' : 'Boss is re-checking price and stock on the live page…';
+  try {
+    const out = await api('/approve/' + runId, { confirm: pendingConfirm });
+    if (out.needs_confirmation) {
+      if (tab) tab.close();
+      pendingConfirm = !!out.can_confirm; setNotice(out.message);
+    } else {
+      pendingConfirm = false; setNotice('');
+      if (tab) { tab.opener = null; tab.location = out.url; } else window.open(out.url, '_blank', 'noopener');
+    }
+  } catch (err) { if (tab) tab.close(); $('error').textContent = err.message; }
+  $('status').textContent = ''; await refreshTrail(); await renderAnalytics().catch(() => {});
 };
 
 $('overrule').onclick = async () => {
@@ -242,7 +267,7 @@ $('overrule').onclick = async () => {
   $('error').textContent = '';
   try {
     const out = await api('/feedback/' + runId, { agent: winner, reason });
-    $('reason').value = ''; renderBoard(out.scoreboard); renderLessons(out.lessons); await refreshTrail(); await renderAnalytics().catch(() => {});
+    $('reason').value = ''; pendingConfirm = false; setNotice(''); renderBoard(out.scoreboard); renderLessons(out.lessons); await refreshTrail(); await renderAnalytics().catch(() => {});
   } catch (err) { $('error').textContent = err.message; }
 };
 $('reason').oninput = () => { $('error').textContent = ''; };
