@@ -61,10 +61,12 @@ JUDGE_EFFORT = os.getenv("BOSS_JUDGE_EFFORT", "medium")
 AMPLITUDE_KEY = os.getenv("AMPLITUDE_API_KEY")
 S2_URL = os.getenv("SINGLESTORE_URL")
 
+# Strategies are modelled on how real personal shopping agents source products (published comparisons of
+# Meta's Muse and Instinct). Boss runs its own agents with these strategies; it does not call Muse or Instinct.
 AGENTS = {
-    "A": "Find the lowest total price from any reputable seller.",
-    "B": "Find the fastest delivery from a major retailer, even if it costs a bit more.",
-    "C": "Find the best value refurbished, open box, or used option from a trusted marketplace.",
+    "A": "Shop the way Meta's Muse does: search the open web, Meta's product catalog listings, and Facebook Marketplace, and pick the best match for the shopper.",
+    "B": "Shop the way Instinct does: search independent Shopify stores that check out with Shop Pay, and pick the best match for the shopper.",
+    "C": "Shop the open web like a classic price comparer: find the lowest total price from a major, reputable retailer.",
 }
 SCORE_STEPS = {"bid_submitted": "bids", "bid_won": "wins", "bid_rejected": "rejected", "user_rejected": "overruled"}
 
