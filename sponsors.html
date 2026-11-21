@@ -23,7 +23,7 @@
 </style></head>
 <body><main>
   <h1>Boss: sponsor integrations</h1>
-  <p class="sub">Cash and Visa prize sponsors only. 5 of 6 connected, checked live on 2026-11-20 15:53
+  <p class="sub">Cash and Visa prize sponsors only. 5 of 6 connected, checked live on 2026-11-20 16:00
   by <code>python check_sponsors.py</code>, which regenerates this page.</p>
   <section class="grid">
       <article class="card ok">
@@ -33,7 +33,7 @@
         <dl>
           <dt>Code</dt><dd><code>main.py: log(), events(), scoreboard(), lessons(), _analytics_sql()</code></dd>
           <dt>Config</dt><dd><code>SINGLESTORE_URL</code></dd>
-          <dt>Live check</dt><dd>events table live: 0 rows across 0 runs; bids by agent {} &middot; 1.96s</dd>
+          <dt>Live check</dt><dd>events table live: 0 rows across 0 runs; bids by agent {} &middot; 1.66s</dd>
         </dl>
       </article>
       <article class="card ok">
@@ -43,7 +43,7 @@
         <dl>
           <dt>Code</dt><dd><code>main.py: track()</code></dd>
           <dt>Config</dt><dd><code>AMPLITUDE_API_KEY</code></dd>
-          <dt>Live check</dt><dd>HTTP 200, events_ingested=1 &middot; 0.21s</dd>
+          <dt>Live check</dt><dd>HTTP 200, events_ingested=1 &middot; 0.28s</dd>
         </dl>
       </article>
       <article class="card ok">
@@ -53,7 +53,7 @@
         <dl>
           <dt>Code</dt><dd><code>main.py: rerank_bids(), _sie_scores()</code></dd>
           <dt>Config</dt><dd><code>SIE_API_KEY, SIE_RERANK_MODEL</code></dd>
-          <dt>Live check</dt><dd>rerank via Qwen/Qwen3-Reranker-0.6B: on-budget bid 0.995 vs over-budget 0.266 &middot; 0.84s</dd>
+          <dt>Live check</dt><dd>rerank via Qwen/Qwen3-Reranker-0.6B: on-budget bid 0.995 vs over-budget 0.266 &middot; 1.67s</dd>
         </dl>
       </article>
       <article class="card ok">
@@ -63,7 +63,7 @@
         <dl>
           <dt>Code</dt><dd><code>main.py: memory_recall(), memory_remember()</code></dd>
           <dt>Config</dt><dd><code>COGNEE_ENABLED, COGNEE_SERVICE_URL, COGNEE_API_KEY</code></dd>
-          <dt>Live check</dt><dd>Cognee Cloud reachable, datasets [&#x27;default_dataset&#x27;]; app memory OFF (COGNEE_ENABLED=0) &middot; 0.38s</dd>
+          <dt>Live check</dt><dd>Cognee Cloud reachable, datasets [&#x27;default_dataset&#x27;, &#x27;main_dataset&#x27;]; app memory ON &middot; 0.53s</dd>
         </dl>
       </article>
       <article class="card ok">
@@ -73,7 +73,7 @@
         <dl>
           <dt>Code</dt><dd><code>drills.py, Firedrill CLI + MCP (.mcp.json)</code></dd>
           <dt>Config</dt><dd><code>browser sign-in (no key)</code></dd>
-          <dt>Live check</dt><dd>CLI signed in, workspace &#x27;Boss&#x27; &middot; 2.2s</dd>
+          <dt>Live check</dt><dd>CLI signed in, workspace &#x27;Boss&#x27; &middot; 2.96s</dd>
         </dl>
       </article>
       <article class="card off">
