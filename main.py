@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -53,7 +54,7 @@ COGNEE_ON = os.getenv("COGNEE_ENABLED", "0") == "1"                # long-term m
 COGNEE_URL, COGNEE_KEY = os.getenv("COGNEE_SERVICE_URL"), os.getenv("COGNEE_API_KEY")
 SIE_KEY = os.getenv("SIE_API_KEY")                                 # Superlinked SIE reranker, optional
 SIE_URL = os.getenv("SIE_BASE_URL")
-SIE_MODEL = os.getenv("SIE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+SIE_MODEL = os.getenv("SIE_RERANK_MODEL", "Qwen/Qwen3-Reranker-0.6B")  # served on SIE Serverless
 AGENT_EFFORT = os.getenv("BOSS_AGENT_EFFORT", "low")    # buying agents: speed matters
 JUDGE_EFFORT = os.getenv("BOSS_JUDGE_EFFORT", "medium")
 AMPLITUDE_KEY = os.getenv("AMPLITUDE_API_KEY")
@@ -87,8 +88,32 @@ def _db():
     return s2.connect(S2_URL)
 
 
+_AMP_FIELDS = ("agent", "price_usd", "duration_ms", "score", "rerank_score", "model", "query", "action", "error")
+
+
+def _amp_mirror(run_id: str, step: str, actor: str, payload: dict) -> None:
+    """Send every audit step to Amplitude as trail_<step>, so the whole run is analysable there too."""
+    if not AMPLITUDE_KEY:
+        return
+    props = {"run_id": run_id, "actor": actor}
+    props.update({k: payload[k] for k in _AMP_FIELDS if isinstance(payload.get(k), (str, int, float, bool))})
+    if isinstance(payload.get("memories"), list):
+        props["memories"] = len(payload["memories"])
+    body = {"api_key": AMPLITUDE_KEY, "events": [{
+        "user_id": "boss-demo-user", "event_type": f"trail_{step}", "event_properties": props,
+        "insert_id": f"{run_id}-{step}-{actor}-{time.time_ns()}"}]}
+
+    def send():
+        try:
+            httpx.post("https://api2.amplitude.com/2/httpapi", json=body, timeout=5)
+        except Exception:
+            pass  # analytics must never break a purchase decision
+    threading.Thread(target=send, daemon=True).start()
+
+
 def log(run_id: str, step: str, actor: str, payload: dict) -> None:
     """Write one audit event. Every action by every agent goes through here."""
+    _amp_mirror(run_id, step, actor, payload)
     if not S2_URL:
         _memory_events.append({
             "run_id": run_id, "step": step, "actor": actor, "payload": payload,
@@ -271,7 +296,12 @@ async def memory_recall(run_id: str, query: str) -> list[str]:
     try:
         cognee = await _cognee()
         results = await asyncio.wait_for(cognee.recall(query_text=query), timeout=20)
-        memories = [str(getattr(r, "text", None) or r) for r in (results or [])][:5]
+        memories = []
+        for r in results or []:
+            text = r.get("text") if isinstance(r, dict) else getattr(r, "text", None) or str(r)
+            if text and "could not find" not in text.lower():
+                memories.append(str(text))
+        memories = memories[:5]
     except Exception as exc:
         log(run_id, "memory_failed", "boss", {"during": "recall", "error": str(exc) or type(exc).__name__})
         return []
@@ -617,6 +647,13 @@ async def approve(run_id: str, body: Approval | None = None):
     log(run_id, "order_approved", "user", {"agent": winner, "url": bid["url"], "price_usd": bid.get("price_usd"),
                                            "confirmed_after_warning": confirm})
     await track("order_approved", {"run_id": run_id, "agent": winner, "price_usd": bid.get("price_usd")})
+    if COGNEE_ON:
+        request = next((e["payload"].get("request") for e in events(run_id=run_id) if e["step"] == "request_received"), "")
+        liked = (f"For a request like \"{request}\", the shopper approved \"{bid.get('title')}\" from "
+                 f"{bid.get('seller')} at ${bid.get('price_usd')} ({bid.get('variant') or 'no variant'}, "
+                 f"delivery {bid.get('delivery') or 'unknown'}).")
+        _background.add(task := asyncio.create_task(memory_remember(run_id, liked)))
+        task.add_done_callback(_background.discard)
     return {"url": bid["url"]}
 
 

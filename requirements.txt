@@ -3,3 +3,5 @@ uvicorn
 anthropic
 httpx
 singlestoredb
+sie-sdk
+cognee
