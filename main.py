@@ -19,6 +19,7 @@ import httpx
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 
@@ -555,9 +556,23 @@ class Feedback(BaseModel):
     reason: str
 
 
+HERE = os.path.dirname(__file__)
+app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+
+
 @app.get("/")
+def landing():
+    return FileResponse(os.path.join(HERE, "landing.html"))
+
+
+@app.get("/how-it-works")
+def how_it_works():
+    return FileResponse(os.path.join(HERE, "how.html"))
+
+
+@app.get("/app")
 def home():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "index.html"))
+    return FileResponse(os.path.join(HERE, "index.html"))
 
 
 @app.post("/shop")

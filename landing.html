@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boss: your buying agents compete, Boss picks</title>
+<link rel="stylesheet" href="/static/site.css">
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">Boss</a>
+  <a href="/how-it-works">How it works</a>
+  <a class="btn" href="/app">Open Boss</a>
+</nav>
+<main>
+  <section class="hero">
+    <div>
+      <h1>Every shopping agent works for a platform. Boss works for you.</h1>
+      <p class="lede">Tell Boss what you need and your rules. It sends three buying agents to search the live web,
+        makes them compete, picks the best real offer, and shows you every step behind the pick.</p>
+      <a class="btn" href="/app">Open Boss</a>
+      <a class="btn quiet" href="/how-it-works">See how it works</a>
+    </div>
+    <div class="stage">
+      <model-viewer src="/static/boss.glb" alt="Boss, a small robot manager in a navy suit holding a clipboard"
+        camera-controls auto-rotate rotation-per-second="18deg" shadow-intensity="0" exposure="1.1"
+        interaction-prompt="none" disable-zoom></model-viewer>
+    </div>
+  </section>
+
+  <h2>Three agents, three ways to buy</h2>
+  <div class="agents">
+    <div class="agent"><h3>Bargain</h3><p>Finds the lowest total price from any reputable seller.</p></div>
+    <div class="agent"><h3>Express</h3><p>Finds the fastest delivery from a major retailer, even if it costs a bit more.</p></div>
+    <div class="agent"><h3>Thrift</h3><p>Finds the best value refurbished, open box, or used option from a trusted marketplace.</p></div>
+  </div>
+
+  <h2>Nothing happens off the record</h2>
+  <div class="panel">
+    <p style="margin-top:0">Every search, bid, verdict, approval and overrule is written to an audit trail you can open.
+      When you overrule Boss, it remembers why and every agent hears about it next time.
+      Boss never pays for you: approving opens the real product page after Boss re-checks the price and stock.</p>
+    <div class="stack">
+      <div><b>SingleStore</b><span>Audit trail, agent scoreboard and SQL analytics</span></div>
+      <div><b>Cognee</b><span>Long-term memory of your lessons and approvals</span></div>
+      <div><b>Superlinked SIE</b><span>Reranks every bid against your request</span></div>
+      <div><b>Amplitude</b><span>Every step of every run as an analytics event</span></div>
+      <div><b>Firedrill</b><span>Drills that try to trick Boss before it touches money</span></div>
+    </div>
+  </div>
+</main>
+<footer>Boss. Built at the Personal Agents Hackathon, San Francisco.</footer>
+</body>
+</html>

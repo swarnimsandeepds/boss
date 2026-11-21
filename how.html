@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Boss works</title>
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">Boss</a>
+  <a href="/how-it-works" aria-current="page">How it works</a>
+  <a class="btn" href="/app">Open Boss</a>
+</nav>
+<main>
+  <h1 style="max-width:16ch;margin-top:24px">How Boss runs your buying agents</h1>
+  <p class="lede">One request goes in. Boss runs the agents on its own, and you make the final call.</p>
+  <ol class="flow">
+    <li><div><h3>You ask, with your rules</h3>
+      <p>Say what you need, your budget and when. Add rules like "no sellers with poor reviews". If the request is too vague, Boss asks one question instead of guessing.</p>
+      <p class="by">Logged as request_received</p></div></li>
+    <li><div><h3>Boss briefs the agents</h3>
+      <p>Boss loads each agent's track record, your past lessons, and memories that match this request, then hands them to every agent.</p>
+      <p class="by">Memory from Cognee, track record from SingleStore</p></div></li>
+    <li><div><h3>Three agents search the live web</h3>
+      <p>Bargain, Express and Thrift each search with their own strategy and come back with one real product, price, seller and link. Every search they run is logged.</p>
+      <p class="by">Live web search by Claude</p></div></li>
+    <li><div><h3>Bids are reranked</h3>
+      <p>Each bid is scored against your request and rules before Boss sees it, so a cheap but off-target pick cannot win on price alone.</p>
+      <p class="by">Reranking by Superlinked SIE Serverless</p></div></li>
+    <li><div><h3>Boss judges and explains</h3>
+      <p>Boss rejects bids that break your rules and picks a winner, with a one-line reason and a score for every agent.</p>
+      <p class="by">Logged as bid_won, bid_rejected, decision_made</p></div></li>
+    <li><div><h3>You approve or overrule</h3>
+      <p>On approve, Boss re-checks the live price and stock, then opens the real product page. It never pays for you. On overrule, your reason becomes a lesson and that agent's trust drops.</p>
+      <p class="by">Lessons and approvals remembered in Cognee</p></div></li>
+    <li><div><h3>Everything stays on the record</h3>
+      <p>Every step is a row in the audit trail and an analytics event, and Boss is drilled against price jumps, wrong sizes, sold-out sellers and vague requests.</p>
+      <p class="by">Trail in SingleStore, events in Amplitude, drills with Firedrill</p></div></li>
+  </ol>
+  <p style="margin-top:32px"><a class="btn" href="/app">Open Boss</a></p>
+</main>
+<footer>Boss. Built at the Personal Agents Hackathon, San Francisco.</footer>
+</body>
+</html>
