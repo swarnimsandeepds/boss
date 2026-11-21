@@ -14,30 +14,36 @@
 </nav>
 <main>
   <h1 style="max-width:16ch;margin-top:24px">How Boss runs your buying agents</h1>
-  <p class="lede">One request goes in. Boss runs the agents on its own, and you make the final call.</p>
-  <ol class="flow">
-    <li><div><h3>You ask, with your rules</h3>
-      <p>Say what you need, your budget and when. Add rules like "no sellers with poor reviews". If the request is too vague, Boss asks one question instead of guessing.</p>
-      <p class="by">Logged as request_received</p></div></li>
-    <li><div><h3>Boss briefs the agents</h3>
-      <p>Boss loads each agent's track record, your past lessons, and memories that match this request, then hands them to every agent.</p>
-      <p class="by">Memory from Cognee, track record from SingleStore</p></div></li>
-    <li><div><h3>Three agents search the live web</h3>
-      <p>Muse-style, Instinct-style and Open web each search with their own strategy and come back with one real product, price, seller and link. Every search they run is logged.</p>
-      <p class="by">Live web search by Claude</p></div></li>
-    <li><div><h3>Bids are reranked</h3>
-      <p>Each bid is scored against your request and rules before Boss sees it, so a cheap but off-target pick cannot win on price alone.</p>
-      <p class="by">Reranking by Superlinked SIE Serverless</p></div></li>
-    <li><div><h3>Boss judges and explains</h3>
-      <p>Boss rejects bids that break your rules and picks a winner, with a one-line reason and a score for every agent.</p>
-      <p class="by">Logged as bid_won, bid_rejected, decision_made</p></div></li>
-    <li><div><h3>You approve or overrule</h3>
-      <p>On approve, Boss re-checks the live price and stock, then opens the real product page. It never pays for you. On overrule, your reason becomes a lesson and that agent's trust drops.</p>
-      <p class="by">Lessons and approvals remembered in Cognee</p></div></li>
-    <li><div><h3>Everything stays on the record</h3>
-      <p>Every step is a row in the audit trail and an analytics event, and Boss is drilled against price jumps, wrong sizes, sold-out sellers and vague requests.</p>
-      <p class="by">Trail in SingleStore, events in Amplitude, drills with Firedrill</p></div></li>
-  </ol>
+  <p class="lede">One request goes in. Boss runs the agents on its own. You make the final call.</p>
+  <div class="fc" role="img" aria-label="Flow: you send a request; Boss briefs three agents with memory; the agents search the live web and bid; SIE reranks the bids; Boss judges; you approve or overrule; overrules become lessons that loop back to Boss. Every step is recorded in SingleStore and Amplitude.">
+    <div class="fc-main">
+      <div class="node you"><b>You</b><span>Request + your rules</span></div>
+      <div class="arrow"></div>
+      <div class="node boss"><b>Boss briefs the agents</b><span>Track record + lessons + matching memories</span>
+        <em>Cognee &middot; SingleStore</em></div>
+      <div class="fan"></div>
+      <div class="agents3">
+        <div class="node agent"><b>Muse-style</b><span>Web, Meta catalog, Marketplace</span><em>Claude web search</em></div>
+        <div class="node agent"><b>Instinct-style</b><span>Shopify stores, Shop Pay</span><em>Claude web search</em></div>
+        <div class="node agent"><b>Open web</b><span>Major retailers, lowest price</span><em>Claude web search</em></div>
+      </div>
+      <div class="fan in"></div>
+      <div class="node"><b>Rerank every bid</b><span>Fit to request and rules</span><em>Superlinked SIE</em></div>
+      <div class="arrow"></div>
+      <div class="node boss"><b>Boss judges</b><span>Rejects rule breakers, picks a winner, gives reasons</span></div>
+      <div class="arrow"></div>
+      <div class="split">
+        <div class="node ok"><b>Approve</b><span>Re-check live price and stock, open the real product page</span></div>
+        <div class="node no"><b>Overrule</b><span>Reason becomes a lesson, agent trust drops</span><em>Cognee remembers</em></div>
+      </div>
+      <div class="loop">Lessons and approvals feed the next briefing</div>
+    </div>
+    <div class="rail">
+      <div class="node rec"><b>Every step recorded</b><span>Audit trail, scoreboard, SQL analytics</span><em>SingleStore</em></div>
+      <div class="node rec"><b>Every step measured</b><span>trail_* events per run</span><em>Amplitude</em></div>
+      <div class="node rec"><b>Drilled before money</b><span>Price jump, wrong size, sold out, vague ask</span><em>Firedrill</em></div>
+    </div>
+  </div>
   <p style="margin-top:32px"><a class="btn" href="/app">Open Boss</a></p>
 </main>
 <footer>Boss. Built at the Personal Agents Hackathon, San Francisco.</footer>
